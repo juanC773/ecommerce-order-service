@@ -5,6 +5,8 @@ import java.time.LocalDateTime;
 
 import javax.persistence.Column;
 import javax.persistence.Entity;
+import javax.persistence.EnumType;
+import javax.persistence.Enumerated;
 import javax.persistence.FetchType;
 import javax.persistence.GeneratedValue;
 import javax.persistence.GenerationType;
@@ -22,18 +24,21 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateTimeDeserializer;
 import com.fasterxml.jackson.datatype.jsr310.ser.LocalDateTimeSerializer;
 import com.selimhorri.app.constant.AppConstant;
+import com.selimhorri.app.domain.enums.OrderStatus;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 @Entity
 @Table(name = "orders")
 @NoArgsConstructor
 @AllArgsConstructor
-@EqualsAndHashCode(callSuper = true, exclude = {"cart"})
+@ToString(exclude = "cart") // Exclude cart to prevent circular reference
+@EqualsAndHashCode(callSuper = true, exclude = { "cart" })
 @Data
 @Builder
 public final class Order extends AbstractMappedEntity implements Serializable {
@@ -61,7 +66,15 @@ public final class Order extends AbstractMappedEntity implements Serializable {
 	@ManyToOne(fetch = FetchType.EAGER)
 	@JoinColumn(name = "cart_id")
 	private Cart cart;
-	
+
+	@Column(name = "is_active")
+	private boolean isActive;
+
+	@Enumerated(EnumType.STRING)
+	@Column(name = "status", nullable = false)
+	@Builder.Default
+	private OrderStatus status = OrderStatus.CREATED;
+
 }
 
 
