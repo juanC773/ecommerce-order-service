@@ -55,25 +55,25 @@ Crear orden
 
 POST `api/orders`
 
-✅ CORREGIDO: Ya no recibe el id, se establece como null para evitar sobreescribir. Valida que el cart exista antes de crear la orden.
+Funciona bien
 
 Editar orden por id
 
 PUT `api/orders/{orderId}`
 
-✅ CORREGIDO: Ahora preserva correctamente el cart asociado y evita referencias circulares usando `mapForUpdate`.
+Funciona bien
 
 Actualizar estado de orden
 
 PATCH `api/orders/{orderId}/status`
 
-Permite actualizar el estado de la orden siguiendo la secuencia: CREATED → ORDERED → IN_PAYMENT
+Funciona bien
 
 Eliminar orden
 
 DELETE `api/orders/{orderId}`
 
-✅ CORREGIDO: Implementa soft delete (desactiva la orden en lugar de borrarla físicamente). No permite eliminar órdenes que ya están en estado IN_PAYMENT.
+Funciona bien
 
 Ejemplo de payload
 
@@ -88,11 +88,3 @@ Ejemplo de payload
     }
 }
 ```
-
-## Mejoras implementadas
-
-- ✅ Soft delete con campo `isActive`
-- ✅ Gestión de estados de orden (`OrderStatus`: CREATED, ORDERED, IN_PAYMENT)
-- ✅ Validación de existencia de cart antes de crear orden
-- ✅ Preservación correcta de referencias en actualizaciones
-- ✅ Método `updateStatus()` para transiciones de estado controladas
