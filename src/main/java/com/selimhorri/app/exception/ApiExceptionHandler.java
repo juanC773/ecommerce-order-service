@@ -3,6 +3,7 @@ package com.selimhorri.app.exception;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -44,11 +45,29 @@ public class ApiExceptionHandler {
 	@ExceptionHandler(value = {
 		CartNotFoundException.class,
 		OrderNotFoundException.class,
-		IllegalStateException.class,
+		EmptyResultDataAccessException.class,
 	})
-	public <T extends RuntimeException> ResponseEntity<ExceptionMsg> handleApiRequestException(final T e) {
+	public <T extends RuntimeException> ResponseEntity<ExceptionMsg> handleNotFoundException(final T e) {
 		
 		log.info("**ApiExceptionHandler controller, handle API request*\n");
+		final var notFound = HttpStatus.NOT_FOUND;
+		
+		return new ResponseEntity<>(
+				ExceptionMsg.builder()
+					.msg("#### " + e.getMessage() + "! ####")
+					.httpStatus(notFound)
+					.timestamp(ZonedDateTime
+							.now(ZoneId.systemDefault()))
+					.build(), notFound);
+	}
+
+	@ExceptionHandler(value = {
+		IllegalStateException.class,
+		IllegalArgumentException.class,
+	})
+	public <T extends RuntimeException> ResponseEntity<ExceptionMsg> handleIllegalStateException(final T e) {
+		
+		log.info("**ApiExceptionHandler controller, handle illegal state exception*\n");
 		final var badRequest = HttpStatus.BAD_REQUEST;
 		
 		return new ResponseEntity<>(
