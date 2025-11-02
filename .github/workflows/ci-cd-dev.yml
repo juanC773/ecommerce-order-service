@@ -1,0 +1,216 @@
+name: Order Service - CI/CD
+
+on:
+  push:
+    branches:
+      - develop
+      - dev
+      - stage
+      - main
+      - master
+  pull_request:
+    branches:
+      - develop
+      - dev
+      - stage
+      - main
+      - master
+  workflow_dispatch:
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: juanc7773/order-service
+  SERVICE_NAME: order-service
+  KUBERNETES_NAMESPACE: ecommerce-dev  # Siempre mismo namespace (estrategia del profe)
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      checks: write  # Necesario para el test reporter
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up JDK 11
+      uses: actions/setup-java@v4
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+        cache: maven
+        
+    - name: Build with Maven
+      run: |
+        mvn clean compile -DskipTests
+        
+    - name: Run Unit Tests
+      run: |
+        mvn test
+        
+    - name: Generate Test Report
+      if: always()
+      uses: dorny/test-reporter@v1
+      with:
+        name: Maven Tests
+        path: target/surefire-reports/*.xml
+        reporter: java-junit
+        fail-on-error: false
+        
+    - name: Package Application
+      run: |
+        mvn clean package -DskipTests
+        
+  build-docker:
+    name: Build and Push Docker Image
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    
+    permissions:
+      contents: read
+      packages: write
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up JDK 11
+      uses: actions/setup-java@v4
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+        cache: maven
+        
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+        
+    - name: Determine image tag
+      id: tag
+      run: |
+        if [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
+          echo "IMAGE_TAG=prod-0.1.0" >> $GITHUB_OUTPUT
+          echo "ENV_NAME=production" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/stage" ]]; then
+          echo "IMAGE_TAG=stage-latest" >> $GITHUB_OUTPUT
+          echo "ENV_NAME=staging" >> $GITHUB_OUTPUT
+        else
+          echo "IMAGE_TAG=dev-latest" >> $GITHUB_OUTPUT
+          echo "ENV_NAME=development" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=raw,value=${{ steps.tag.outputs.IMAGE_TAG }}
+          type=sha,format=short
+          type=raw,value=0.1.0
+          
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+  deploy:
+    name: Deploy to Kubernetes
+    needs: build-docker
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+      
+    steps:
+    - name: Determine environment and tag
+      id: env
+      run: |
+        if [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
+          echo "IMAGE_TAG=prod-0.1.0" >> $GITHUB_OUTPUT
+          echo "ENV_NAME=production" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/stage" ]]; then
+          echo "IMAGE_TAG=stage-latest" >> $GITHUB_OUTPUT
+          echo "ENV_NAME=staging" >> $GITHUB_OUTPUT
+        else
+          echo "IMAGE_TAG=dev-latest" >> $GITHUB_OUTPUT
+          echo "ENV_NAME=development" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Checkout infrastructure repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ secrets.INFRA_REPO || format('{0}/ecommerce-infra', github.repository_owner) }}
+        path: infra
+        
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+        
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+        
+    - name: Configure kubectl
+      run: |
+        az aks get-credentials --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} --name ${{ secrets.AZURE_AKS_CLUSTER }} --overwrite-existing
+        
+    - name: Create namespace if not exists
+      run: |
+        kubectl create namespace ${{ env.KUBERNETES_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+        
+    - name: Deploy to Kubernetes
+      run: |
+        # Use dynamic tag based on branch (siempre mismo namespace: ecommerce-dev)
+        IMAGE_NAME="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.env.outputs.IMAGE_TAG }}"
+        
+        # Create temporary deployment file from infra repo
+        cp infra/k8s/order-service/deployment.yaml deployment.tmp.yaml
+        sed -i "s|<REGISTRY>/order-service:0.1.0|${IMAGE_NAME}|g" deployment.tmp.yaml
+        
+        kubectl apply -f deployment.tmp.yaml -n ${{ env.KUBERNETES_NAMESPACE }}
+        kubectl apply -f infra/k8s/order-service/configmap.yaml -n ${{ env.KUBERNETES_NAMESPACE }}
+        
+        # Cleanup
+        rm deployment.tmp.yaml
+        
+    - name: Force rollout restart (para tags estáticos como dev-latest)
+      run: |
+        # Cuando usamos tags estáticos (dev-latest, stage-latest), Kubernetes puede no detectar
+        # que la imagen cambió. Forzamos el restart para asegurar que descargue la nueva imagen.
+        if [[ "${{ steps.env.outputs.IMAGE_TAG }}" == "dev-latest" ]] || \
+           [[ "${{ steps.env.outputs.IMAGE_TAG }}" == "stage-latest" ]]; then
+          echo "Tag estático detectado: ${{ steps.env.outputs.IMAGE_TAG }}"
+          echo "Forzando rollout restart para asegurar descarga de nueva imagen..."
+          kubectl rollout restart deployment/${{ env.SERVICE_NAME }} -n ${{ env.KUBERNETES_NAMESPACE }}
+        else
+          echo "Tag único detectado: ${{ steps.env.outputs.IMAGE_TAG }}, no se necesita restart forzado"
+        fi
+        
+    - name: Wait for deployment
+      run: |
+        kubectl rollout status deployment/${{ env.SERVICE_NAME }} -n ${{ env.KUBERNETES_NAMESPACE }} --timeout=300s
+        
+    - name: Verify deployment
+      run: |
+        kubectl get pods -n ${{ env.KUBERNETES_NAMESPACE }} -l app=${{ env.SERVICE_NAME }}
+        kubectl get svc -n ${{ env.KUBERNETES_NAMESPACE }} -l app=${{ env.SERVICE_NAME }}
+
