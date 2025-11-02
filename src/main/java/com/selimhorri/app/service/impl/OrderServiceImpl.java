@@ -1,5 +1,7 @@
 package com.selimhorri.app.service.impl;
 
+import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -7,6 +9,7 @@ import javax.transaction.Transactional;
 
 import org.springframework.stereotype.Service;
 
+import com.selimhorri.app.domain.Cart;
 import com.selimhorri.app.domain.Order;
 import com.selimhorri.app.domain.enums.OrderStatus;
 import com.selimhorri.app.dto.OrderDto;
@@ -59,8 +62,8 @@ public class OrderServiceImpl implements OrderService {
                         throw new IllegalArgumentException("Order must be associated with a cart");
                 }
 
-                // Check if cart exists
-                cartRepository.findById(orderDto.getCartDto().getCartId())
+                // Check if cart exists and get the full Cart entity
+                Cart cart = cartRepository.findById(orderDto.getCartDto().getCartId())
                                 .orElseThrow(() -> {
                                         log.error("Cart not found with ID: {}", orderDto.getCartDto().getCartId());
                                         return new CartNotFoundException(
@@ -68,8 +71,23 @@ public class OrderServiceImpl implements OrderService {
                                 });
 
                 // Proceed with saving if validations pass
-                return OrderMappingHelper.map(
-                                this.orderRepository.save(OrderMappingHelper.mapForCreationOrder(orderDto)));
+                // Use the loaded Cart entity instead of creating a new one
+                Order newOrder = Order.builder()
+                                .orderId(null)
+                                .orderDate(LocalDateTime.now())
+                                .orderDesc(orderDto.getOrderDesc())
+                                .orderFee(orderDto.getOrderFee())
+                                .isActive(true)
+                                .status(OrderStatus.CREATED)
+                                .cart(cart)  // Use the loaded Cart entity
+                                .build();
+                
+                // Set createdAt manually if JPA Auditing is not working
+                if (newOrder.getCreatedAt() == null) {
+                        newOrder.setCreatedAt(Instant.now());
+                }
+                
+                return OrderMappingHelper.map(this.orderRepository.save(newOrder));
         }
 
         @Override
