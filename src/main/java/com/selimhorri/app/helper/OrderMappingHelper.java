@@ -20,6 +20,7 @@ public interface OrderMappingHelper {
                                 .cartDto(
                                                 CartDto.builder()
                                                                 .cartId(order.getCart().getCartId())
+                                                                .userId(order.getCart().getUserId())  // Incluir userId
                                                                 .build())
                                 .build();
         }

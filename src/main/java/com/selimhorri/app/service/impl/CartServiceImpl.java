@@ -49,8 +49,26 @@ public class CartServiceImpl implements CartService {
 		return this.cartRepository.findById(cartId)
 				.map(CartMappingHelper::map)
 				.map(c -> {
-					c.setUserDto(this.restTemplate.getForObject(AppConstant.DiscoveredDomainsApi
-							.USER_SERVICE_API_URL + "/" + c.getUserDto().getUserId(), UserDto.class));
+					// Solo llamar a User Service si userId existe
+					if (c.getUserId() != null && c.getUserDto() != null && c.getUserDto().getUserId() != null) {
+						try {
+							log.debug("Calling USER-SERVICE to get user with ID: {}", c.getUserDto().getUserId());
+							UserDto userDto = this.restTemplate.getForObject(AppConstant.DiscoveredDomainsApi
+									.USER_SERVICE_API_URL + "/" + c.getUserDto().getUserId(), UserDto.class);
+							if (userDto != null) {
+								c.setUserDto(userDto);
+								log.debug("Successfully retrieved user data from USER-SERVICE");
+							} else {
+								log.warn("USER-SERVICE returned null for user ID: {}", c.getUserDto().getUserId());
+							}
+						} catch (Exception e) {
+							log.error("Failed to call USER-SERVICE for user ID {}: {}", c.getUserDto().getUserId(), e.getMessage());
+							// No lanzar excepción, solo loguear el error y continuar sin userDto completo
+							// Esto permite que el carrito se retorne aunque la llamada a User Service falle
+						}
+					} else {
+						log.warn("Cart {} has null userId or userDto, skipping USER-SERVICE call", cartId);
+					}
 					return c;
 				})
 				.orElseThrow(() -> new CartNotFoundException(String
