@@ -256,3 +256,56 @@ jobs:
           e2e-results.json
         retention-days: 30
 
+  performance-tests:
+    name: Run Performance Tests (Locust)
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/stage')
+    
+    steps:
+    - name: Checkout API Gateway Repository (para performance tests)
+      uses: actions/checkout@v4
+      with:
+        repository: juanC773/ecommerce-api-gateway
+        path: api-gateway
+        ref: ${{ github.ref_name }}
+        
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        cd api-gateway/performance-tests
+        pip install -r requirements.txt
+        
+    - name: Wait for services to be ready
+      run: |
+        echo "Esperando 30 segundos para que todos los servicios estén listos..."
+        sleep 30
+        
+    - name: Run Performance Tests
+      run: |
+        cd api-gateway/performance-tests
+        locust -f locustfile.py \
+          --host=http://20.15.17.8:8080 \
+          --users=50 \
+          --spawn-rate=5 \
+          --run-time=2m \
+          --headless \
+          --html=locust-report.html \
+          --csv=locust-results \
+          --loglevel=INFO
+        
+    - name: Upload Performance Test Report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-test-report
+        path: |
+          api-gateway/performance-tests/locust-report.html
+          api-gateway/performance-tests/locust-results*.csv
+        retention-days: 30
+
