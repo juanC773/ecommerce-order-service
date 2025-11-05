@@ -4,7 +4,7 @@ COPY pom.xml .
 COPY src ./src
 RUN mvn clean package -DskipTests
 
-FROM openjdk:11-jre-slim
+FROM eclipse-temurin:11-jre
 ARG PROJECT_VERSION=0.1.0
 WORKDIR /app
 COPY --from=build /app/target/order-service-*.jar order-service.jar
